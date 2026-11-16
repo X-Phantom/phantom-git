@@ -458,20 +458,22 @@ class TestE2EStandaloneBinaryVerification:
 
     def test_standalone_cli_help(self) -> None:
         """Verify git-mgr executable runs directly and outputs Typer command reference."""
-        # Use python executable's Scripts directory or entry point
-        env = os.environ.copy()
-        python_scripts = Path(os.sys.executable).parent / "Scripts"
-        env["PATH"] = f"{python_scripts}{os.pathsep}{env.get('PATH', '')}"
+        import shutil
+        import sys
 
-        # Test standalone invocation
-        cmd = ["git-mgr", "--help"]
+        env = os.environ.copy()
+        scripts_dir = Path(sys.executable).parent / ("Scripts" if os.name == "nt" else "bin")
+        env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
+        exe = shutil.which("git-mgr", path=env["PATH"]) or "git-mgr"
+
         proc = subprocess.run(
-            cmd,
+            [exe, "--help"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            shell=True,
+            shell=False,
+            timeout=30,
             env=env,
         )
         assert proc.returncode == 0
@@ -487,17 +489,22 @@ class TestE2EStandaloneBinaryVerification:
 
     def test_standalone_cli_version(self) -> None:
         """Verify git-mgr --version prints version string."""
+        import shutil
+        import sys
+
         env = os.environ.copy()
-        python_scripts = Path(os.sys.executable).parent / "Scripts"
-        env["PATH"] = f"{python_scripts}{os.pathsep}{env.get('PATH', '')}"
+        scripts_dir = Path(sys.executable).parent / ("Scripts" if os.name == "nt" else "bin")
+        env["PATH"] = f"{scripts_dir}{os.pathsep}{env.get('PATH', '')}"
+        exe = shutil.which("git-mgr", path=env["PATH"]) or "git-mgr"
 
         proc = subprocess.run(
-            ["git-mgr", "--version"],
+            [exe, "--version"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            shell=True,
+            shell=False,
+            timeout=30,
             env=env,
         )
         assert proc.returncode == 0
