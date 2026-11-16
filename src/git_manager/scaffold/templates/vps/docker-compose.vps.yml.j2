@@ -1,0 +1,28 @@
+# Phantom Git — Docker Compose Multi-Environment VPS Stack for {{ app_name }}
+
+services:
+  {{ app_name }}-staging:
+    build:
+      context: /var/www/{{ app_name }}-staging
+    container_name: {{ app_name }}-staging
+    restart: unless-stopped
+    env_file:
+      - /var/www/{{ app_name }}-staging/.env
+    environment:
+      - PORT=3000
+      - APP_ENV=staging
+    ports:
+      - "127.0.0.1:3001:3000"
+
+  {{ app_name }}-prod:
+    build:
+      context: /var/www/{{ app_name }}-prod
+    container_name: {{ app_name }}-prod
+    restart: unless-stopped
+    env_file:
+      - /var/www/{{ app_name }}-prod/.env
+    environment:
+      - PORT=3000
+      - APP_ENV=production
+    ports:
+      - "127.0.0.1:3000:3000"

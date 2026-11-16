@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Code Quality & Type Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install quality tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" || pip install ruff
+
+      - name: Lint & Format Check with ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+  test:
+    name: Unit & Component Tests (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" || pip install -r requirements.txt || true
+
+      - name: Run Unit & Component Tests with pytest
+        shell: bash
+        run: |
+          set +e
+          pytest --cov --cov-report=xml -v
+          rc=$?
+          if [ $rc -eq 5 ]; then exit 0; else exit $rc; fi
+
+  build:
+    name: Production Standalone Build
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Verify Production Standalone Build
+        run: |
+          if [ -d src ]; then python -m compileall -q src; else python -m compileall -q .; fi
+          if [ -f pyproject.toml ]; then python -m build --no-isolation || python -m build; fi
+
+      - name: Package Python build artifact for VPS transfer
+        run: tar -czf vps-build.tar.gz --exclude='.git' --exclude='.venv' --exclude='__pycache__' .
+
+      - name: Upload VPS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-build
+          path: vps-build.tar.gz
+          retention-days: 1
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.VPS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.yourdomain.com
+    steps:
+      - name: Download pre-built artifact from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-build
+
+      - name: Transfer build artifact to VPS Staging directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: vps-build.tar.gz
+          target: /var/www/phantom-git-staging
+
+      - name: Unpack and reload Staging process (pm2)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /var/www/phantom-git-staging
+            tar -xzf vps-build.tar.gz && rm -f vps-build.tar.gz
+            PORT=3001 pm2 reload phantom-git-staging || PORT=3001 pm2 start npm --name "phantom-git-staging" -- start
+            pm2 save
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.VPS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://yourdomain.com
+    steps:
+      - name: Download pre-built artifact from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-build
+
+      - name: Transfer build artifact to VPS Production directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: vps-build.tar.gz
+          target: /var/www/phantom-git-prod
+
+      - name: Unpack and reload Production process (pm2)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /var/www/phantom-git-prod
+            tar -xzf vps-build.tar.gz && rm -f vps-build.tar.gz
+            PORT=3000 pm2 reload phantom-git-prod || PORT=3000 pm2 start npm --name "phantom-git-prod" -- start
+            pm2 save

@@ -1,0 +1,342 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+concurrency:
+  group: {{ "${{ github.workflow }}-${{ github.ref }}" }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Code Quality & Type Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+{% if project_type in ["node", "javascript", "typescript"] %}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Type Integrity Check
+        run: |
+          if [ -f tsconfig.json ]; then npx tsc --noEmit; fi
+
+      - name: Linter Check
+{% if testing_tier == "prototype" %}
+        continue-on-error: true
+{% endif %}
+        run: npm run lint --if-present
+{% else %}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install quality tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" || pip install ruff
+
+      - name: Lint & Format Check with ruff
+{% if testing_tier == "prototype" %}
+        continue-on-error: true
+{% endif %}
+        run: |
+          ruff check .
+          ruff format --check .
+{% endif %}
+
+  test:
+{% if project_type in ["node", "javascript", "typescript"] %}
+    name: Unit & Component Tests (Node {{ "${{ matrix.node-version }}" }} on {{ "${{ matrix.os }}" }})
+{% else %}
+    name: Unit & Component Tests (Python {{ "${{ matrix.python-version }}" }} on {{ "${{ matrix.os }}" }})
+{% endif %}
+    runs-on: {{ "${{ matrix.os }}" }}
+    strategy:
+      fail-fast: false
+      matrix:
+{% if multi_os %}
+        os: [ubuntu-latest, windows-latest, macos-latest]
+{% else %}
+        os: [ubuntu-latest]
+{% endif %}
+{% if project_type in ["node", "javascript", "typescript"] %}
+        node-version:
+          - "20"
+          - "22"
+{% else %}
+        python-version:
+{% for py_ver in python_versions | default(['3.10', '3.11', '3.12']) %}
+          - "{{ py_ver }}"
+{% endfor %}
+{% endif %}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+{% if testing_tier == "prototype" %}
+      - name: Prototype Tier Notice
+        run: echo "Unit & Component Tests skipped in prototype tier (Stage 1)."
+{% elif project_type in ["node", "javascript", "typescript"] %}
+      - name: Set up Node.js {{ "${{ matrix.node-version }}" }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: {{ "${{ matrix.node-version }}" }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Run Unit & Component Tests
+        shell: bash
+        run: npm test --if-present -- --watchAll=false --passWithNoTests
+{% if testing_tier == "strict" %}
+
+      - name: Run Strict E2E & Security Audit
+        shell: bash
+        run: |
+          npm run test:e2e --if-present
+          npm audit --audit-level=high || true
+{% endif %}
+{% else %}
+      - name: Set up Python {{ "${{ matrix.python-version }}" }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: {{ "${{ matrix.python-version }}" }}
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" || pip install -r requirements.txt || true
+
+      - name: Run Unit & Component Tests with pytest
+        shell: bash
+        run: |
+          set +e
+          pytest --cov --cov-report=xml -v
+          rc=$?
+          if [ $rc -eq 5 ]; then exit 0; else exit $rc; fi
+{% if testing_tier == "strict" %}
+
+      - name: Run Strict E2E Tests
+        shell: bash
+        run: |
+          set +e
+          pytest -m e2e -v
+          rc=$?
+          if [ $rc -eq 5 ]; then exit 0; else exit $rc; fi
+{% endif %}
+{% endif %}
+
+  build:
+    name: Production Standalone Build
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+{% if project_type in ["node", "javascript", "typescript"] %}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build production bundle
+        run: npm run build --if-present
+{% if enable_vps_deploy | default(true) and build_strategy | default("github") == "github" %}
+
+      - name: Package build artifact for VPS transfer
+        run: |
+          mkdir -p .vps-artifact
+          for item in dist .next out build package.json package-lock.json public; do
+            if [ -e "$item" ]; then cp -r "$item" .vps-artifact/; fi
+          done
+          tar -czf vps-build.tar.gz -C .vps-artifact .
+
+      - name: Upload VPS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-build
+          path: vps-build.tar.gz
+          retention-days: 1
+{% endif %}
+{% else %}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Verify Production Standalone Build
+        run: |
+          if [ -d src ]; then python -m compileall -q src; else python -m compileall -q .; fi
+          if [ -f pyproject.toml ]; then python -m build --no-isolation || python -m build; fi
+{% if enable_vps_deploy | default(true) and build_strategy | default("github") == "github" %}
+
+      - name: Package Python build artifact for VPS transfer
+        run: tar -czf vps-build.tar.gz --exclude='.git' --exclude='.venv' --exclude='__pycache__' .
+
+      - name: Upload VPS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vps-build
+          path: vps-build.tar.gz
+          retention-days: 1
+{% endif %}
+{% endif %}
+{% if enable_vps_deploy | default(true) %}
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.{{ domain | default("yourdomain.com") }}
+    steps:
+{% if build_strategy | default("github") == "github" %}
+      - name: Download pre-built artifact from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-build
+
+      - name: Transfer build artifact to VPS Staging directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          source: vps-build.tar.gz
+          target: /var/www/{{ app_name | default("app") }}-staging
+
+      - name: Unpack and reload Staging process ({{ deploy_mode | default("pm2") }})
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          script: |
+            cd /var/www/{{ app_name | default("app") }}-staging
+            tar -xzf vps-build.tar.gz && rm -f vps-build.tar.gz
+{% if deploy_mode | default("pm2") == "docker" %}
+            docker compose -f deploy/vps/docker-compose.vps.yml up -d --build {{ app_name | default("app") }}-staging
+{% else %}
+{% if project_type in ["node", "javascript", "typescript"] %}
+            npm ci --omit=dev || true
+{% endif %}
+            PORT=3001 pm2 reload {{ app_name | default("app") }}-staging || PORT=3001 pm2 start npm --name "{{ app_name | default("app") }}-staging" -- start
+            pm2 save
+{% endif %}
+{% else %}
+      - name: Sync & build Staging directly on VPS over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          script: |
+            cd /var/www/{{ app_name | default("app") }}-staging
+            git fetch origin staging
+            git reset --hard origin/staging
+{% if deploy_mode | default("pm2") == "docker" %}
+            docker compose -f deploy/vps/docker-compose.vps.yml up -d --build {{ app_name | default("app") }}-staging
+{% else %}
+{% if project_type in ["node", "javascript", "typescript"] %}
+            npm ci && npm run build
+{% endif %}
+            PORT=3001 pm2 reload {{ app_name | default("app") }}-staging || PORT=3001 pm2 start npm --name "{{ app_name | default("app") }}-staging" -- start
+            pm2 save
+{% endif %}
+{% endif %}
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [quality, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://{{ domain | default("yourdomain.com") }}
+    steps:
+{% if build_strategy | default("github") == "github" %}
+      - name: Download pre-built artifact from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: vps-build
+
+      - name: Transfer build artifact to VPS Production directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          source: vps-build.tar.gz
+          target: /var/www/{{ app_name | default("app") }}-prod
+
+      - name: Unpack and reload Production process ({{ deploy_mode | default("pm2") }})
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          script: |
+            cd /var/www/{{ app_name | default("app") }}-prod
+            tar -xzf vps-build.tar.gz && rm -f vps-build.tar.gz
+{% if deploy_mode | default("pm2") == "docker" %}
+            docker compose -f deploy/vps/docker-compose.vps.yml up -d --build {{ app_name | default("app") }}-prod
+{% else %}
+{% if project_type in ["node", "javascript", "typescript"] %}
+            npm ci --omit=dev || true
+{% endif %}
+            PORT=3000 pm2 reload {{ app_name | default("app") }}-prod || PORT=3000 pm2 start npm --name "{{ app_name | default("app") }}-prod" -- start
+            pm2 save
+{% endif %}
+{% else %}
+      - name: Sync & build Production directly on VPS over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: {{ "${{ secrets.VPS_HOST }}" }}
+          username: {{ "${{ secrets.VPS_USER }}" }}
+          key: {{ "${{ secrets.VPS_SSH_KEY }}" }}
+          script: |
+            cd /var/www/{{ app_name | default("app") }}-prod
+            git fetch origin main
+            git reset --hard origin/main
+{% if deploy_mode | default("pm2") == "docker" %}
+            docker compose -f deploy/vps/docker-compose.vps.yml up -d --build {{ app_name | default("app") }}-prod
+{% else %}
+{% if project_type in ["node", "javascript", "typescript"] %}
+            npm ci && npm run build
+{% endif %}
+            PORT=3000 pm2 reload {{ app_name | default("app") }}-prod || PORT=3000 pm2 start npm --name "{{ app_name | default("app") }}-prod" -- start
+            pm2 save
+{% endif %}
+{% endif %}
+{% endif %}

@@ -1,0 +1,46 @@
+// Phantom Git — PM2 Multi-Environment Configuration for {{ app_name }}
+// Staging: localhost:3001 (/var/www/{{ app_name }}-staging)
+// Production: localhost:3000 (/var/www/{{ app_name }}-prod)
+
+module.exports = {
+  apps: [
+    {
+      name: "{{ app_name }}-staging",
+      cwd: "/var/www/{{ app_name }}-staging",
+{% if project_type in ["node", "javascript", "typescript"] %}
+      script: "npm",
+      args: "start",
+{% else %}
+      script: "python3",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 3001",
+{% endif %}
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "512M",
+      env: {
+        NODE_ENV: "staging",
+        PORT: 3001,
+      },
+    },
+    {
+      name: "{{ app_name }}-prod",
+      cwd: "/var/www/{{ app_name }}-prod",
+{% if project_type in ["node", "javascript", "typescript"] %}
+      script: "npm",
+      args: "start",
+{% else %}
+      script: "python3",
+      args: "-m uvicorn main:app --host 0.0.0.0 --port 3000",
+{% endif %}
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "1G",
+      env: {
+        NODE_ENV: "production",
+        PORT: 3000,
+      },
+    },
+  ],
+};

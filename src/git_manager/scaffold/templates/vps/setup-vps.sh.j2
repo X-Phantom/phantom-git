@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Phantom Git — Custom VPS Multi-Environment Provisioning Script
+# Prepares isolated Staging (port 3001) and Production (port 3000) directories.
+
+APP_NAME="{{ app_name }}"
+DEPLOY_MODE="{{ deploy_mode }}"
+STAGING_DIR="/var/www/${APP_NAME}-staging"
+PROD_DIR="/var/www/${APP_NAME}-prod"
+
+echo "==> Provisioning VPS directories for ${APP_NAME} (${DEPLOY_MODE})..."
+sudo mkdir -p "${STAGING_DIR}" "${PROD_DIR}"
+sudo chown -R "$USER":"$USER" "${STAGING_DIR}" "${PROD_DIR}"
+
+if [ ! -f "${STAGING_DIR}/.env" ]; then
+  echo "# Staging environment variables for ${APP_NAME}" > "${STAGING_DIR}/.env"
+  echo "PORT=3001" >> "${STAGING_DIR}/.env"
+  echo "Created ${STAGING_DIR}/.env — populate Staging secrets before deploying."
+fi
+
+if [ ! -f "${PROD_DIR}/.env" ]; then
+  echo "# Production environment variables for ${APP_NAME}" > "${PROD_DIR}/.env"
+  echo "PORT=3000" >> "${PROD_DIR}/.env"
+  echo "Created ${PROD_DIR}/.env — populate Production secrets before deploying."
+fi
+
+{% if deploy_mode == "docker" %}
+echo "==> Verifying Docker & Docker Compose availability..."
+docker --version
+docker compose version
+echo "Next: Copy docker-compose.vps.yml and reverse proxy config, then launch containers."
+{% else %}
+echo "==> Verifying PM2 process manager availability..."
+if ! command -v pm2 >/dev/null 2>&1; then
+  echo "Installing PM2 globally..."
+  sudo npm install -g pm2
+fi
+pm2 --version
+echo "Next: Configure Nginx/Caddy reverse proxy and start processes using ecosystem.config.cjs."
+{% endif %}
+
+echo "==> VPS setup complete!"

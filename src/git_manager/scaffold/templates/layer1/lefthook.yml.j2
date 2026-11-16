@@ -1,0 +1,47 @@
+# Lefthook Git Hooks Configuration (Layer 1 Gatekeeper)
+# Refer to: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+{% if project_type == "python" %}
+    ruff-lint:
+      glob: "*.py"
+      run: ruff check --fix {staged_files}
+      stage_fixed: true
+    ruff-format:
+      glob: "*.py"
+      run: ruff format {staged_files}
+      stage_fixed: true
+{% elif project_type in ["node", "javascript", "typescript"] %}
+    lint:
+      glob: "*.{js,ts,jsx,tsx,json,css,md}"
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+    format:
+      glob: "*.{js,ts,jsx,tsx,json,css,md}"
+      run: npx prettier --write {staged_files}
+      stage_fixed: true
+{% else %}
+    lint:
+      run: echo "Linting staged files"
+{% endif %}
+    secrets-audit:
+      tags: security secret-scan
+      run: |
+        python -c "import sys, re; patterns = [(r'sk-[a-zA-Z0-9]{20,}', 'OpenAI API Key'), (r'gh[pousr]_[A-Za-z0-9_]{36,}', 'GitHub Personal Access Token'), (r'AIza[0-9A-Za-z\-_]{35}', 'Google API Key'), (r'(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}', 'AWS Access Key'), (r'-----BEGIN [A-Z ]*PRIVATE KEY-----', 'Private Key Header')]; files = sys.argv[1:]; found = False; [print(f'SECURITY ALERT: Potential {name} detected in {f}', file=sys.stderr) or (found := True) for f in files for pat, name in patterns if open(f, 'r', encoding='utf-8', errors='ignore').read() and re.search(pat, open(f, 'r', encoding='utf-8', errors='ignore').read())]; sys.exit(1 if found else 0)" {staged_files}
+
+commit-msg:
+  commands:
+    conventional-commits:
+      run: |
+        python -c "import sys, re; msg_file = sys.argv[1]; lines = [l for l in open(msg_file, 'r', encoding='utf-8').readlines() if not l.startswith('#')]; sys.exit(0 if not lines else (0 if re.match(r'^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9_.-]+\))?!?: .+$', lines[0].strip()) else (print('ERROR: Commit message must comply with Conventional Commits specification! Format: <type>(<scope>): <subject>', file=sys.stderr) or 1)))" {1}
+
+pre-push:
+  commands:
+    protect-main-branch:
+      run: |
+        python -c "import subprocess, sys; b = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip(); sys.exit((print('ERROR: Direct push to main/staging blocked by GitHub Flow policy. Use a feature branch and open a PR.', file=sys.stderr) or 1) if b in ('main', 'master', 'staging') else 0)"
+    preflight-3-pillars:
+      run: |
+        python -c "import shutil, subprocess, sys; exe = shutil.which('pgit') or shutil.which('phantom-git'); sys.exit(subprocess.call([exe, 'check']) if exe else 0)"

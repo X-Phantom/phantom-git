@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# GitHub Branch Ruleset Setup Script
+# Requires GitHub CLI (gh) authenticated: gh auth login
+
+set -euo pipefail
+
+REPO="${1:-{{ repo_full_name | default('') }}}"
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+fi
+
+if [ -z "$REPO" ]; then
+  echo "Error: Target repository not specified and could not be detected from git origin."
+  echo "Usage: ./setup-ruleset.sh [OWNER/REPO]"
+  exit 1
+fi
+
+echo "Configuring GitHub Branch Ruleset for: $REPO"
+
+# Check authentication
+if ! gh auth status >/dev/null 2>&1; then
+  echo "Error: gh CLI is not authenticated. Please run 'gh auth login' first."
+  exit 1
+fi
+
+cat << 'EOF' > /tmp/ruleset-payload.json
+{
+  "name": "default-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH",
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "CI"
+          }
+        ]
+      }
+    }
+  ]
+}
+EOF
+
+gh api \
+  --method POST \
+  -H "Accept: application/vnd.github+json" \
+  "/repos/$REPO/rulesets" \
+  --input /tmp/ruleset-payload.json
+
+rm -f /tmp/ruleset-payload.json
+
+# Enable auto-merge and auto-delete head branches
+gh api \
+  --method PATCH \
+  -H "Accept: application/vnd.github+json" \
+  "/repos/$REPO" \
+  -F delete_branch_on_merge=true \
+  -F allow_squash_merge=true \
+  -F allow_merge_commit=false \
+  -F allow_rebase_merge=false
+
+echo "Ruleset successfully applied to $REPO (main branch protected, squash merge enforced, CI checks required)."

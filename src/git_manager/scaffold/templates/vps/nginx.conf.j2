@@ -1,0 +1,43 @@
+# Phantom Git — Nginx Reverse Proxy for {{ domain }} & staging.{{ domain }}
+# Enable HTTPS certificates via Certbot: sudo certbot --nginx -d {{ domain }} -d staging.{{ domain }}
+
+# Production Server ({{ domain }} -> localhost:3000)
+server {
+    listen 80;
+    server_name {{ domain }};
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# Staging Server (staging.{{ domain }} -> localhost:3001)
+server {
+    listen 80;
+    server_name staging.{{ domain }};
+
+    # Optional: Protect staging behind HTTP Basic Auth
+    # Run: sudo htpasswd -c /etc/nginx/.htpasswd-staging admin
+    # auth_basic "Staging Environment";
+    # auth_basic_user_file /etc/nginx/.htpasswd-staging;
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}

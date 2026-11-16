@@ -1,0 +1,89 @@
+<#
+.SYNOPSIS
+    Configures GitHub Branch Protection Ruleset using GitHub CLI (gh).
+.DESCRIPTION
+    Protects 'main', enforces status check 'CI', enforces Squash & Merge,
+    and enables automatic deletion of merged head branches.
+.PARAMETER Repo
+    Repository in 'owner/repo' format. If omitted, detects from current git remote.
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)]
+    [string]$Repo = "{{ repo_full_name | default('') }}"
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not $Repo) {
+    try {
+        $Repo = (gh repo view --json nameWithOwner -q .nameWithOwner 2>$null)
+    } catch {
+        $Repo = $null
+    }
+}
+
+if (-not $Repo) {
+    Write-Error "Target repository not specified and could not be detected from git remote. Usage: .\setup-ruleset.ps1 -Repo 'owner/repo'"
+    exit 1
+}
+
+Write-Host "Configuring GitHub Branch Ruleset for: $Repo" -ForegroundColor Cyan
+
+# Verify gh CLI is installed and authenticated
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+    Write-Error "GitHub CLI ('gh') is not installed. Please install it from https://cli.github.com/"
+    exit 1
+}
+
+$payload = @{
+    name = "default-protection"
+    target = "branch"
+    enforcement = "active"
+    conditions = @{
+        ref_name = @{
+            include = @("~DEFAULT_BRANCH", "refs/heads/main")
+            exclude = @()
+        }
+    }
+    rules = @(
+        @{ type = "deletion" },
+        @{ type = "non_fast_forward" },
+        @{
+            type = "pull_request"
+            parameters = @{
+                required_approving_review_count = 0
+                dismiss_stale_reviews_on_push = $true
+                require_code_owner_review = $false
+                require_last_push_approval = $false
+                required_review_thread_resolution = $true
+            }
+        },
+        @{
+            type = "required_status_checks"
+            parameters = @{
+                strict_required_status_checks_policy = $true
+                required_status_checks = @(
+                    @{ context = "CI" }
+                )
+            }
+        }
+    )
+} | ConvertTo-Json -Depth 10
+
+$tempFile = [System.IO.Path]::GetTempFileName()
+try {
+    [System.IO.File]::WriteAllText($tempFile, $payload, [System.Text.Encoding]::UTF8)
+    gh api --method POST -H "Accept: application/vnd.github+json" "/repos/$Repo/rulesets" --input $tempFile
+} finally {
+    if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+}
+
+# Configure repository settings: squash merge only, delete head branches
+gh api --method PATCH -H "Accept: application/vnd.github+json" "/repos/$Repo" `
+    -F delete_branch_on_merge=true `
+    -F allow_squash_merge=true `
+    -F allow_merge_commit=false `
+    -F allow_rebase_merge=false
+
+Write-Host "Successfully configured GitHub Ruleset for $Repo." -ForegroundColor Green

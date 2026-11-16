@@ -1,0 +1,17 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "{{ release_type | default('python') }}",
+      "package-name": "{{ package_name }}",
+      "initial-version": "{{ initial_version | default('0.1.0') }}",
+      "changelog-sections": [
+        {"type": "feat", "section": "Features"},
+        {"type": "fix", "section": "Bug Fixes"},
+        {"type": "perf", "section": "Performance Improvements"},
+        {"type": "revert", "section": "Reverts"},
+        {"type": "docs", "section": "Documentation"},
+        {"type": "chore", "section": "Miscellaneous Chores"}
+      ]
+    }
+  }
+}

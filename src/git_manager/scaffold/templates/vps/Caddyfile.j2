@@ -1,0 +1,14 @@
+# Phantom Git — Caddy Reverse Proxy with Automatic HTTPS
+# Place at /etc/caddy/Caddyfile and run: sudo systemctl reload caddy
+
+{{ domain }} {
+    reverse_proxy 127.0.0.1:3000
+}
+
+staging.{{ domain }} {
+    # Optional: Lock staging behind basicauth (generate hash with: caddy hash-password)
+    # basicauth /* {
+    #     admin $2a$14$REPLACE_WITH_BCRYPT_HASH
+    # }
+    reverse_proxy 127.0.0.1:3001
+}
