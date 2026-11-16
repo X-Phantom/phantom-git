@@ -200,7 +200,7 @@ jobs:
 {% if enable_vps_deploy | default(true) and build_strategy | default("github") == "github" %}
 
       - name: Package Python build artifact for VPS transfer
-        run: tar -czf vps-build.tar.gz --exclude='.git' --exclude='.venv' --exclude='__pycache__' .
+        run: tar -czf /tmp/vps-build.tar.gz --exclude='.git' --exclude='.venv' --exclude='__pycache__' . && mv /tmp/vps-build.tar.gz vps-build.tar.gz
 
       - name: Upload VPS build artifact
         uses: actions/upload-artifact@v4
