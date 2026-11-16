@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phantom-git"
-version = "0.5.0"
+version = "0.1.0"
 description = "Phantom Git (pgit / git-mgr) — Agentic Git Orchestrator & Multi-Repo Manager designed for developers and AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
