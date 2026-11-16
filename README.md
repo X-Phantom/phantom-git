@@ -183,6 +183,66 @@ pgit --path "C:\path\to\repo" --workspace "C:\Users\Ehtes\OneDrive\Desktop\Proje
 
 ---
 
+## 🤖 AI Agent Integration Guide (Headless CLI vs Interactive TUI)
+
+Phantom Git separates **Human Interactive Mode** from **Autonomous AI Agent Mode** so coding agents (Codex, Claude Code, Cursor, Antigravity, etc.) never hang on TTY prompts or block on interactive TUI screens:
+
+| Mode | Entrypoint | Intended User | Behavior |
+| :--- | :--- | :--- | :--- |
+| **Human Interactive Mode** | `pgit` (or `pgit tui` / `pgit ui`) | Human developers | Enters alternate screen buffer with full mouse/keyboard Lazygit TUI; terminates cleanly on `Ctrl+C` or `q`. |
+| **Autonomous AI Agent Mode** | `pgit <subcommand> ...` | AI coding agents & CI | Strictly headless, deterministic, `GIT_TERMINAL_PROMPT=0` & `GH_PROMPT_DISABLED=1`, machine-readable outputs and exit codes (`0`/`1`). |
+
+> **Important for AI Agents**: Never invoke bare `pgit` without a subcommand inside an automated shell — it launches the alternate-screen TUI and waits for interactive input.
+
+### Autonomous AI Agent Execution Loop
+
+1. **Verify GitHub Authentication & Repository State**:
+   ```bash
+   pgit auth status            # Confirm active @username, protocol, and token scopes
+   pgit auth repos             # List GitHub repos and matched local clones
+   pgit status                 # Structured working tree, staged/unstaged/untracked state
+   ```
+2. **Create a Pre-Mutation Safety Bookmark & Feature Branch**:
+   ```bash
+   pgit snapshot "before-task" # Captures dirty state safely under refs/git-mgr/bookmarks/
+   pgit flow start feat/<slug> # Syncs staging/main and creates a compliant prefixed branch
+   ```
+3. **Verify 3-Pillar CI Locally & Commit Atomically**:
+   ```bash
+   pgit check --tier production
+   git add -A
+   pgit commit --auto --strict-flow
+   ```
+4. **Open Pull Request, Inspect Remote CI, Self-Heal, & Merge**:
+   ```bash
+   pgit flow pr                # Runs local 3-pillar check, pushes branch, opens PR
+   pgit flow checks            # Inspects remote GitHub Actions PR check states
+   pgit flow logs              # On failure: writes root-cause report to .phantom-git/last-ci-failure.md
+   pgit flow merge             # On green checks: squash-merges PR & cleans up branch
+   pgit flow promote           # Optional release flow: merges staging -> main (--merge)
+   ```
+5. **Scaffold AI Agent Instructions Into Any Repo**:
+   ```bash
+   pgit scaffold agents --project-name my-app --project-type python --tier production --cursor-claude --overwrite
+   ```
+   Generates synchronized `AGENTS.md`, `.cursorrules`, `CLAUDE.md`, `.github/pull_request_template.md`, and `.github/dependabot.yml`.
+
+---
+
+## 📋 Complete CLI Subcommand Reference
+
+| Command Group | Subcommands / Flags | Purpose |
+| :--- | :--- | :--- |
+| **TUI** | `pgit`, `pgit tui`, `pgit ui` (`-p`, `-w`) | Launch alternate-screen Lazygit TUI (`Ctrl+C` or `q` to quit) |
+| **GitHub Auth** | `pgit auth status`, `login` (`--token` / `--web`), `logout`, `repos` | Connect GitHub account, configure Git credentials, list/match repos |
+| **GitHub Flow** | `pgit flow init-branches`, `start`, `check`, `pr`, `checks`, `logs`, `merge`, `promote` | End-to-end 3-branch (`feat/* -> staging -> main`) orchestration |
+| **Pre-Flight CI** | `pgit check --tier prototype\|production\|strict` | Run Quality/Types, Unit Tests, and Standalone Build locally |
+| **Core Git & Safety** | `pgit status`, `branch`, `branches`, `commit` (`--auto`, `--strict-flow`), `stash`, `sync`, `snapshot`, `undo`, `log-linear` | Deterministic 80/20 Git primitives and reflog rollback |
+| **Multi-Repo** | `pgit scan [dir]`, `pgit sync-all [dir]` (`--dry-run`, `--force`) | Recursive repo discovery, health audit, and safe rebase sync |
+| **Scaffolding & Env** | `pgit scaffold init\|vps\|agents\|ruleset`, `pgit env sync\|set` | Layer 1/2/3 guardrails, VPS configs, agent rules, `.env.example` & secrets |
+
+---
+
 ## 🧪 Testing & Verification
 
 The test harness runs in complete isolation using disposable Git sandboxes:

@@ -4,6 +4,21 @@ You are the Lead DevOps & GitHub Release Agent for **phantom-git** (`python`). B
 
 ---
 
+## 0. Headless AI Execution & GitHub Authentication Rules
+
+1. **NEVER run bare `pgit` (or `pgit tui` / `pgit ui`) inside an automated AI agent shell.**
+   - Bare `pgit` launches the interactive alternate-screen Lazygit TUI and blocks waiting for keyboard/mouse input until `Ctrl+C` or `q`.
+   - Always pass explicit non-interactive subcommands (`pgit status`, `pgit check`, `pgit flow ...`, `pgit auth ...`, `pgit commit ...`, `pgit snapshot`, `pgit undo --force`).
+2. **Verify GitHub Account Connectivity (`pgit auth`):**
+   - Check active GitHub authentication: `pgit auth status`
+   - List connected GitHub repositories and matched local clones: `pgit auth repos`
+   - Authenticate headlessly with a Personal Access Token: `pgit auth login --token <PAT>` (or interactively for human setup via `pgit auth login --web`).
+3. **Pre-Mutation Safety Net (`pgit snapshot` & `pgit undo`):**
+   - Before multi-file refactors, rebases, or history changes, create a bookmark: `pgit snapshot "before-<task>"`
+   - Roll back safely via Git reflog if needed: `pgit undo --force`
+
+---
+
 ## 1. Core Git & Branching Rules (Strict Enforcement)
 
 1. **NEVER commit or push directly to `main` or `staging`.**
@@ -27,8 +42,10 @@ pgit check --tier production
 ```
 
 This verifies the 3 CI pillars locally before triggering remote GitHub Actions:
-1. **Code Quality & Type Integrity**: `ruff check .` + `ruff format --check .`2. **Unit & Component Tests**: `pytest -q` *(Note: If you modified UI components or business logic, inspect and update stale placeholder tests rather than letting CI fail on outdated assertions.)*
+1. **Code Quality & Type Integrity**: `ruff check .` + `ruff format --check .`
+2. **Unit & Component Tests**: `pytest -q` *(Note: If you modified UI components or business logic, inspect and update stale placeholder tests rather than letting CI fail on outdated assertions.)*
 3. **Production Standalone Build**: `python -m compileall -q src`
+
 ---
 
 ## 3. Pull Request & Promotion Workflow (Phantom Git / `gh`)
